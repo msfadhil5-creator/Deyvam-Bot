@@ -18,6 +18,7 @@
     "voicelog",
     "status",
     "redemption"
+    "disconnect"
   ],
   "author": "Rick",
   "license": "MIT",
