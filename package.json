@@ -1,24 +1,26 @@
 {
-  "name": "deyvam",
+  "name": "deyvam-bot",
   "version": "1.0.0",
-  "description": "A Discord bot with /say, welcome & goodbye embeds (custom channels), /setvoicelog for voice join/leave/move logs, moderation (kick/ban), moveuser command, and dynamic member count status.",
+  "description": "A comprehensive Discord bot with moderation, voice management, welcome/goodbye embeds, voice logging, self-roles, and dynamic status features.",
   "main": "index.js",
   "scripts": {
-    "start": "node index.js"
+    "start": "node index.js",
+    "dev": "nodemon index.js",
+    "test": "echo \"No tests specified\" && exit 0"
   },
   "keywords": [
     "discord",
     "bot",
+    "moderation",
     "welcome",
     "goodbye",
-    "say",
-    "kick",
-    "ban",
-    "moveuser",
-    "voicelog",
-    "status",
-    "redemption"
-    "disconnect"
+    "voice",
+    "management",
+    "self-roles",
+    "logging",
+    "disconnect",
+    "gaming",
+    "community"
   ],
   "author": "Rick",
   "license": "MIT",
@@ -26,5 +28,11 @@
     "discord.js": "^14.14.1",
     "dotenv": "^16.4.5",
     "express": "^4.19.2"
+  },
+  "devDependencies": {
+    "nodemon": "^3.1.0"
+  },
+  "engines": {
+    "node": ">=16.11.0"
   }
 }
