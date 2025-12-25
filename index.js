@@ -131,6 +131,36 @@ const moveUserCommand = new SlashCommandBuilder()
   .addChannelOption(opt => opt.setName('channel').setDescription('Voice channel').setRequired(true))
   .setDefaultMemberPermissions(PermissionFlagsBits.MoveMembers);
 
+const disconnectCommand = new SlashCommandBuilder()
+  .setName('disconnect')
+  .setDescription('Disconnect a member from voice channel')
+  .addUserOption(opt => 
+    opt.setName('target')
+      .setDescription('The member to disconnect')
+      .setRequired(true)
+  )
+  .addStringOption(opt => 
+    opt.setName('reason')
+      .setDescription('Reason for disconnection')
+      .setRequired(false)
+  )
+  .setDefaultMemberPermissions(PermissionFlagsBits.MoveMembers);
+
+const disconnectAllCommand = new SlashCommandBuilder()
+  .setName('disconnectall')
+  .setDescription('Disconnect all members from a voice channel')
+  .addChannelOption(opt => 
+    opt.setName('channel')
+      .setDescription('Voice channel to clear')
+      .setRequired(true)
+  )
+  .addStringOption(opt => 
+    opt.setName('reason')
+      .setDescription('Reason for mass disconnection')
+      .setRequired(false)
+  )
+  .setDefaultMemberPermissions(PermissionFlagsBits.MoveMembers);
+
 const setRolePanelCommand = new SlashCommandBuilder()
   .setName('setrolepanel')
   .setDescription('Creates the button-based self-role panel in the current channel.')
@@ -152,6 +182,8 @@ client.once('ready', async () => {
         kickCommand,
         banCommand,
         moveUserCommand,
+        disconnectCommand,       // Added
+        disconnectAllCommand,    // Added
         setRolePanelCommand 
       ].map(c => c.toJSON())
     });
@@ -199,11 +231,18 @@ client.on(Events.InteractionCreate, async interaction => {
                     inline: false 
                 },
                 { 
+                    name: '🎮 Voice Management Commands (Admin)', 
+                    value: 
+                        '**/moveuser @user #channel**: Moves a user to a different voice channel.\n' +
+                        '**/disconnect @user [reason]**: Disconnects a user from their current voice channel.\n' +
+                        '**/disconnectall #channel [reason]**: Disconnects ALL users from a specific voice channel.',
+                    inline: false 
+                },
+                { 
                     name: '🛠️ Moderation Commands (Admin)', 
                     value: 
                         '**/kick @user [reason]**: Removes a member from the server.\n' +
-                        '**/ban @user [reason]**: Permanently bans a member from the server.\n' +
-                        '**/moveuser @user #channel**: Moves a user to a different voice channel.',
+                        '**/ban @user [reason]**: Permanently bans a member from the server.',
                     inline: false 
                 },
                 { 
@@ -312,6 +351,7 @@ client.on(Events.InteractionCreate, async interaction => {
         }
       }
 
+      // --- MOVE USER COMMAND ---
       if (interaction.commandName === 'moveuser') {
         const target = interaction.options.getUser('target');
         const channel = interaction.options.getChannel('channel');
@@ -323,6 +363,174 @@ client.on(Events.InteractionCreate, async interaction => {
           await interaction.reply(`✅ Moved **${target.tag}** to **${channel.name}**`);
         } catch {
           await interaction.reply({ content: '❌ Failed to move. Check permissions.', ephemeral: true });
+        }
+      }
+
+      // --- DISCONNECT COMMAND (Single User) ---
+      if (interaction.commandName === 'disconnect') {
+        await interaction.deferReply({ ephemeral: false });
+        
+        const target = interaction.options.getUser('target');
+        const reason = interaction.options.getString('reason') || 'No reason provided';
+        const member = await interaction.guild.members.fetch(target.id).catch(() => null);
+        
+        if (!member) {
+          return await interaction.editReply({ content: '❌ Member not found.', ephemeral: false });
+        }
+        
+        if (!member.voice.channel) {
+          return await interaction.editReply({ content: `❌ **${target.tag}** is not in a voice channel.`, ephemeral: false });
+        }
+        
+        const channelName = member.voice.channel.name;
+        
+        try {
+          await member.voice.disconnect();
+          
+          const successEmbed = new EmbedBuilder()
+            .setColor(0x57F287) // Green
+            .setTitle('✅ User Disconnected')
+            .setDescription(`**${target.tag}** has been disconnected from voice chat.`)
+            .addFields(
+              { name: '👤 User', value: `${target} (${target.tag})`, inline: true },
+              { name: '📊 User ID', value: `\`${target.id}\``, inline: true },
+              { name: '🎮 Channel', value: `\`${channelName}\``, inline: true },
+              { name: '📝 Reason', value: reason, inline: false }
+            )
+            .setThumbnail(target.displayAvatarURL({ dynamic: true }))
+            .setFooter({ text: `Disconnected by ${interaction.user.tag}`, iconURL: interaction.user.displayAvatarURL({ dynamic: true }) })
+            .setTimestamp();
+          
+          await interaction.editReply({ embeds: [successEmbed] });
+          
+          // Log to voice log channel if set
+          const voiceLogChannelId = getSetting('VOICE_LOG_CHANNEL_ID');
+          if (voiceLogChannelId) {
+            const logChannel = interaction.guild.channels.cache.get(voiceLogChannelId);
+            if (logChannel) {
+              const logEmbed = new EmbedBuilder()
+                .setColor(0xED4245) // Red
+                .setTitle('🔌 FORCED DISCONNECT')
+                .setDescription(`**Member:** ${member} (\`${member.id}\`) was forcibly disconnected from voice.`)
+                .addFields(
+                  { name: 'Channel', value: `\`${channelName}\``, inline: true },
+                  { name: 'Reason', value: reason, inline: true },
+                  { name: 'Action By', value: `${interaction.user.tag} (\`${interaction.user.id}\`)`, inline: true }
+                )
+                .setThumbnail(target.displayAvatarURL({ dynamic: true }))
+                .setFooter({ text: `DEYVAM Voice Management • User ID: ${member.id}` })
+                .setTimestamp();
+              
+              await logChannel.send({ embeds: [logEmbed] });
+            }
+          }
+          
+        } catch (error) {
+          console.error('Disconnect error:', error);
+          await interaction.editReply({ 
+            content: `❌ Failed to disconnect **${target.tag}**. The bot may lack permissions or the user is in a higher role.` 
+          });
+        }
+      }
+
+      // --- DISCONNECT ALL COMMAND (Clear Channel) ---
+      if (interaction.commandName === 'disconnectall') {
+        await interaction.deferReply({ ephemeral: false });
+        
+        const channel = interaction.options.getChannel('channel');
+        const reason = interaction.options.getString('reason') || 'Channel clearing';
+        
+        if (channel.type !== 2) {
+          return await interaction.editReply({ content: '❌ Please select a voice channel.', ephemeral: false });
+        }
+        
+        const voiceChannel = interaction.guild.channels.cache.get(channel.id);
+        if (!voiceChannel) {
+          return await interaction.editReply({ content: '❌ Voice channel not found.', ephemeral: false });
+        }
+        
+        const members = voiceChannel.members;
+        if (members.size === 0) {
+          return await interaction.editReply({ content: `❌ **${voiceChannel.name}** is already empty.`, ephemeral: false });
+        }
+        
+        try {
+          const disconnectedMembers = [];
+          const failedMembers = [];
+          
+          // Disconnect all members
+          for (const [memberId, member] of members) {
+            try {
+              await member.voice.disconnect();
+              disconnectedMembers.push(`• ${member.user.tag} (\`${memberId}\`)`);
+            } catch (error) {
+              failedMembers.push(`• ${member.user.tag} (\`${memberId}\`) - ${error.message}`);
+            }
+          }
+          
+          // Create result embed
+          const resultEmbed = new EmbedBuilder()
+            .setColor(disconnectedMembers.length > 0 ? 0x57F287 : 0xED4245)
+            .setTitle(`🎮 Channel Cleared: ${voiceChannel.name}`)
+            .setDescription(`Disconnected **${disconnectedMembers.length}** member(s) from the voice channel.`)
+            .addFields(
+              { name: '📊 Channel', value: `${voiceChannel} (\`${voiceChannel.name}\`)`, inline: true },
+              { name: '👥 Total Members', value: `${members.size}`, inline: true },
+              { name: '📝 Reason', value: reason, inline: true }
+            );
+          
+          if (disconnectedMembers.length > 0) {
+            const disconnectedText = disconnectedMembers.join('\n').substring(0, 1000);
+            resultEmbed.addFields({ 
+              name: `✅ Disconnected (${disconnectedMembers.length})`, 
+              value: disconnectedText || 'None', 
+              inline: false 
+            });
+          }
+          
+          if (failedMembers.length > 0) {
+            const failedText = failedMembers.join('\n').substring(0, 1000);
+            resultEmbed.addFields({ 
+              name: `❌ Failed (${failedMembers.length})`, 
+              value: failedText || 'None', 
+              inline: false 
+            });
+          }
+          
+          resultEmbed.setFooter({ 
+            text: `Action by ${interaction.user.tag}`, 
+            iconURL: interaction.user.displayAvatarURL({ dynamic: true }) 
+          })
+          .setTimestamp();
+          
+          await interaction.editReply({ embeds: [resultEmbed] });
+          
+          // Log to voice log channel if set
+          const voiceLogChannelId = getSetting('VOICE_LOG_CHANNEL_ID');
+          if (voiceLogChannelId && disconnectedMembers.length > 0) {
+            const logChannel = interaction.guild.channels.cache.get(voiceLogChannelId);
+            if (logChannel) {
+              const logEmbed = new EmbedBuilder()
+                .setColor(0xF04747) // Blurple
+                .setTitle('🚨 MASS DISCONNECT')
+                .setDescription(`**Channel:** ${voiceChannel} (\`${voiceChannel.name}\`) was cleared.`)
+                .addFields(
+                  { name: 'Members Disconnected', value: `${disconnectedMembers.length}`, inline: true },
+                  { name: 'Reason', value: reason, inline: true },
+                  { name: 'Action By', value: `${interaction.user.tag} (\`${interaction.user.id}\`)`, inline: true }
+                )
+                .setFooter({ text: `DEYVAM Voice Management • Channel ID: ${voiceChannel.id}` })
+                .setTimestamp();
+              
+              await logChannel.send({ embeds: [logEmbed] });
+            }
+          }
+          
+        } catch (error) {
+          console.error('DisconnectAll error:', error);
+          await interaction.editReply({ 
+            content: `❌ Failed to clear channel **${voiceChannel.name}**. The bot may lack permissions.` 
+          });
         }
       }
 
